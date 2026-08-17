@@ -1,0 +1,37 @@
+import sys
+import pandas as pd
+import numpy as np
+sys.stdout.reconfigure(encoding='utf-8')
+products = pd.read_csv(r'C:\Users\stama\Downloads\1-lh_nautical_csv\products.csv', encoding='latin1')
+product_variants = pd.read_csv(r'C:\Users\stama\Downloads\1-lh_nautical_csv\product_variants.csv')
+orders = pd.read_csv(r'C:\Users\stama\Downloads\1-lh_nautical_csv\orders.csv')
+order_items = pd.read_csv(r'C:\Users\stama\Downloads\1-lh_nautical_csv\order_items.csv')
+products['clean_name'] = products['name'].apply(lambda x: x.encode('latin1').decode('utf-8', errors='ignore') if isinstance(x, str) else x)
+prod_ids = products[products['clean_name'] == 'Bússola de Bordo 702']['id'].tolist()
+print("Product IDs for 'Bússola de Bordo 702':", prod_ids)
+variant_ids = product_variants[product_variants['product_id'].isin(prod_ids)]['id'].tolist()
+print("Variant IDs:", variant_ids)
+items = order_items[order_items['product_variant_id'].isin(variant_ids)].copy()
+merged = items.merge(orders[['id', 'created_at']], left_on='order_id', right_on='id')
+merged['dt'] = pd.to_datetime(merged['created_at'])
+merged['year_month'] = merged['dt'].dt.to_period('M')
+monthly = merged.groupby('year_month')['quantity'].sum().reset_index()
+all_months = pd.period_range('2020-01', '2026-12', freq='M')
+df_monthly = pd.DataFrame({'year_month': all_months}).merge(monthly, on='year_month', how='left').fillna({'quantity': 0})
+df_monthly['quantity'] = df_monthly['quantity'].astype(int)
+df_monthly['ma3'] = df_monthly['quantity'].shift(1).rolling(3).mean()
+train = df_monthly[df_monthly['year_month'] <= '2025-12']
+test = df_monthly[(df_monthly['year_month'] >= '2026-01') & (df_monthly['year_month'] <= '2026-03')].copy()
+test['abs_error'] = np.abs(test['quantity'] - test['ma3'])
+mae = test['abs_error'].mean()
+print("\n=========================================================================================")
+print("TABELA UNIFICADA & RESULTADOS DO MODELO BASELINE (MÉDIA MÓVEL 3 MESES)")
+print("=========================================================================================")
+print("Histórico dos 3 meses que antecedem o teste (Out, Nov, Dez / 2025):")
+for idx, row in train[train['year_month'] >= '2025-10'].iterrows():
+    print(f"  Mês: {row['year_month']} | Venda Real: {row['quantity']:2d} unidades")
+print("\nPrevisões para o Q1 2026 (Período de Teste):")
+for idx, row in test.iterrows():
+    print(f"  Mês: {row['year_month']} | Venda Real (y): {row['quantity']:2d} un | Previsão (ŷ): {row['ma3']:5.2f} un | Erro Absoluto: {row['abs_error']:5.2f}")
+print(f"\nMétrica MAE (Mean Absolute Error) no Q1 2026: {mae:.2f} unidades")
+print("=========================================================================================")
